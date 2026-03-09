@@ -8,12 +8,14 @@ The Cirklon is a class-compliant USB MIDI device with 6 ports — no drivers nee
 
 - **Transport** — Start, Stop, Continue, MIDI Clock sender
 - **Scene/Song** — Select scenes (0-127), transpose, program change with bank select
-- **Notes & CCs** — Send notes, CCs, pitch bend, aftertouch to any instrument channel
+- **Notes & CCs** — Send notes, chords, CCs, pitch bend, aftertouch to any channel
+- **Musical Helpers** — Chord sender, CC sweep/ramp, NRPN/RPN, raw MIDI
 - **Recording** — Send timed note sequences and CC automation streams for real-time recording
 - **SysEx** — Send/receive raw SysEx, full memory dump backup
 - **Monitor** — Log and filter incoming MIDI from the Cirklon
+- **Safety** — All Notes Off, full MIDI panic (reset all channels + stop)
 
-20 tools across 7 categories.
+28 tools across 10 categories.
 
 ## Requirements
 
@@ -25,7 +27,7 @@ The Cirklon is a class-compliant USB MIDI device with 6 ports — no drivers nee
 
 ```bash
 # Clone
-git clone https://github.com/yourusername/cirklon-mcp.git
+git clone https://github.com/Ziforge/cirklon-mcp.git
 cd cirklon-mcp
 
 # Install dependencies
@@ -52,9 +54,12 @@ Once registered, use natural language in Claude Code:
 "Start playback"
 "Select scene 5"
 "Send a C major chord on channel 1"
+"Sweep filter cutoff (CC74) from 0 to 127 over 2 seconds on channel 3"
 "Start monitoring MIDI input"
 "Show me the last 20 MIDI messages"
+"MIDI panic — kill all notes"
 "Back up the Cirklon via SysEx dump"
+"What's the current status?"
 ```
 
 ## Tools Reference
@@ -84,6 +89,14 @@ Once registered, use natural language in Claude Code:
 | Monitor | `start_midi_monitor` | Begin logging input |
 | | `stop_midi_monitor` | Stop logging |
 | | `get_midi_log` | Retrieve recent messages |
+| Safety | `all_notes_off` | CC#123 on one or all channels |
+| | `midi_panic` | Full reset: notes off + controllers + stop |
+| Status | `query_status` | Connection, monitor, clock, config |
+| Helpers | `send_chord` | Multiple notes simultaneously |
+| | `sweep_cc` | Ramp CC from start to end value |
+| | `send_nrpn` | Non-Registered Parameter Number |
+| | `send_rpn` | Registered Parameter Number |
+| | `send_raw` | Raw MIDI bytes (power users) |
 
 ## Cirklon Configuration
 

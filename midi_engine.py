@@ -302,6 +302,49 @@ class MidiEngine:
         if bank_lsb is not None:
             self.send_cc(channel, 32, bank_lsb)
 
+    # -- Safety --
+
+    def all_notes_off(self, channel: int) -> None:
+        """Send CC#123 (All Notes Off) on a single channel."""
+        self.send_cc(channel, 123, 0)
+
+    def panic(self) -> None:
+        """Emergency stop: All Notes Off + Reset All Controllers + Pitch Bend
+        center on all 16 channels, plus MIDI Stop."""
+        for ch in range(1, 17):
+            self.send_cc(ch, 123, 0)   # All Notes Off
+            self.send_cc(ch, 121, 0)   # Reset All Controllers
+            self.send_pitch_bend(ch, 8192)  # Center pitch bend
+        self.send_stop()
+
+    # -- NRPN / RPN --
+
+    def send_nrpn(
+        self, channel: int, param_msb: int, param_lsb: int,
+        value_msb: int, value_lsb: int = 0,
+    ) -> None:
+        """Send NRPN (Non-Registered Parameter Number) message."""
+        self.send_cc(channel, 99, param_msb)  # NRPN MSB
+        self.send_cc(channel, 98, param_lsb)  # NRPN LSB
+        self.send_cc(channel, 6, value_msb)    # Data Entry MSB
+        self.send_cc(channel, 38, value_lsb)   # Data Entry LSB
+
+    def send_rpn(
+        self, channel: int, param_msb: int, param_lsb: int,
+        value_msb: int, value_lsb: int = 0,
+    ) -> None:
+        """Send RPN (Registered Parameter Number) message."""
+        self.send_cc(channel, 101, param_msb)  # RPN MSB
+        self.send_cc(channel, 100, param_lsb)  # RPN LSB
+        self.send_cc(channel, 6, value_msb)     # Data Entry MSB
+        self.send_cc(channel, 38, value_lsb)    # Data Entry LSB
+
+    # -- Raw --
+
+    def send_raw(self, data: list[int]) -> None:
+        """Send raw MIDI bytes with no framing or validation."""
+        self._send(data)
+
     # -- SysEx --
 
     def send_sysex(self, data: list[int]) -> None:
@@ -348,6 +391,10 @@ class MidiEngine:
     @property
     def is_monitoring(self) -> bool:
         return self._monitoring
+
+    @property
+    def log_count(self) -> int:
+        return len(self._message_log)
 
     def get_log(
         self, count: int = 50, type_filter: str | None = None

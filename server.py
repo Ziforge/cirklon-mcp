@@ -636,6 +636,277 @@ async def get_midi_log(
 
 
 # ===================================================================
+# 8. SAFETY TOOLS (2)
+# ===================================================================
+
+
+@mcp.tool()
+async def all_notes_off(ctx: Context, channel: int = 0) -> str:
+    """Send All Notes Off (CC#123) to silence stuck notes.
+
+    Args:
+        channel: MIDI channel 1-16, or 0 for all channels.
+    """
+    engine = _require_connection(ctx)
+    loop = asyncio.get_event_loop()
+
+    if channel == 0:
+        for ch in range(1, 17):
+            await loop.run_in_executor(
+                None, lambda c=ch: engine.all_notes_off(c)
+            )
+        return "All Notes Off sent on channels 1-16"
+    else:
+        await loop.run_in_executor(
+            None, lambda: engine.all_notes_off(channel)
+        )
+        return f"All Notes Off sent on ch {channel}"
+
+
+@mcp.tool()
+async def midi_panic(ctx: Context) -> str:
+    """Emergency MIDI panic — silence everything immediately.
+
+    Sends All Notes Off (CC#123), Reset All Controllers (CC#121),
+    and centers pitch bend on all 16 channels, then sends MIDI Stop.
+    Use this if you hear stuck notes or need to reset synth state.
+    """
+    engine = _require_connection(ctx)
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, engine.panic)
+    return "MIDI PANIC: All Notes Off + Reset Controllers + Stop on all 16 channels"
+
+
+# ===================================================================
+# 9. STATUS TOOL (1)
+# ===================================================================
+
+
+@mcp.tool()
+async def query_status(ctx: Context) -> str:
+    """Show full Cirklon MCP server status: connection, monitor, clock, config."""
+    engine = _engine(ctx)
+    config = _config(ctx)
+    lc = ctx.request_context.lifespan_context
+    clock_task = lc.get("clock_task")
+
+    lines = ["=== Cirklon MCP Status ==="]
+    lines.append(f"  Connected: {engine.connected}")
+    if engine.connected:
+        lines.append(f"  Output: {engine._out_port_name}")
+        lines.append(f"  Input:  {engine._in_port_name}")
+    lines.append(f"  Monitor: {'running' if engine.is_monitoring else 'stopped'}")
+    lines.append(f"  Log messages: {engine.log_count}")
+    clock_running = clock_task is not None and not clock_task.done()
+    lines.append(f"  Clock: {'running' if clock_running else 'stopped'}")
+    lines.append(f"  Remote channel: {config.remote_channel}")
+    lines.append(f"  Default BPM: {config.default_bpm}")
+    return "\n".join(lines)
+
+
+# ===================================================================
+# 10. MUSICAL HELPER TOOLS (5)
+# ===================================================================
+
+
+# Note name lookup for send_chord and natural language
+_NOTE_NAMES = {
+    "C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11,
+}
+
+
+def _parse_note_name(name: str) -> int | None:
+    """Parse note name like 'C4', 'F#3', 'Bb5' to MIDI number."""
+    name = name.strip()
+    if not name:
+        return None
+
+    idx = 0
+    base = name[idx].upper()
+    if base not in _NOTE_NAMES:
+        return None
+    note = _NOTE_NAMES[base]
+    idx += 1
+
+    # Accidentals
+    if idx < len(name) and name[idx] in ("#", "s"):
+        note += 1
+        idx += 1
+    elif idx < len(name) and name[idx] in ("b",):
+        note -= 1
+        idx += 1
+
+    # Octave
+    try:
+        octave = int(name[idx:])
+    except (ValueError, IndexError):
+        return None
+
+    midi = (octave + 1) * 12 + note
+    if 0 <= midi <= 127:
+        return midi
+    return None
+
+
+@mcp.tool()
+async def send_chord(
+    ctx: Context,
+    channel: int,
+    notes: list[int],
+    velocity: int = 100,
+    duration_ms: int = 500,
+) -> str:
+    """Send multiple notes simultaneously as a chord.
+
+    Args:
+        channel: MIDI channel 1-16.
+        notes: List of MIDI note numbers (e.g. [60, 64, 67] for C major).
+        velocity: Velocity 0-127.
+        duration_ms: Chord duration in milliseconds.
+    """
+    engine = _require_connection(ctx)
+    loop = asyncio.get_event_loop()
+
+    # All notes on
+    for n in notes:
+        await loop.run_in_executor(
+            None, lambda note=n: engine.send_note_on(channel, note, velocity)
+        )
+
+    await asyncio.sleep(duration_ms / 1000.0)
+
+    # All notes off
+    for n in notes:
+        await loop.run_in_executor(
+            None, lambda note=n: engine.send_note_off(channel, note)
+        )
+
+    note_str = ", ".join(str(n) for n in notes)
+    return f"Chord [{note_str}] vel={velocity} dur={duration_ms}ms on ch {channel}"
+
+
+@mcp.tool()
+async def sweep_cc(
+    ctx: Context,
+    channel: int,
+    cc: int,
+    start_value: int,
+    end_value: int,
+    duration_ms: int = 1000,
+    steps: int = 50,
+) -> str:
+    """Smoothly ramp a CC value from start to end over a duration.
+
+    Useful for filter sweeps, volume fades, and parameter automation.
+
+    Args:
+        channel: MIDI channel 1-16.
+        cc: CC number 0-127.
+        start_value: Starting CC value 0-127.
+        end_value: Ending CC value 0-127.
+        duration_ms: Total sweep duration in milliseconds.
+        steps: Number of intermediate steps (more = smoother).
+    """
+    engine = _require_connection(ctx)
+    loop = asyncio.get_event_loop()
+    steps = max(2, min(steps, 500))
+    interval = duration_ms / 1000.0 / steps
+
+    for i in range(steps + 1):
+        t = i / steps
+        val = int(start_value + (end_value - start_value) * t)
+        val = max(0, min(127, val))
+        await loop.run_in_executor(
+            None, lambda v=val: engine.send_cc(channel, cc, v)
+        )
+        if i < steps:
+            await asyncio.sleep(interval)
+
+    return (
+        f"Swept CC{cc} from {start_value} to {end_value} "
+        f"over {duration_ms}ms ({steps} steps) on ch {channel}"
+    )
+
+
+@mcp.tool()
+async def send_nrpn(
+    ctx: Context,
+    channel: int,
+    param_msb: int,
+    param_lsb: int,
+    value_msb: int,
+    value_lsb: int = 0,
+) -> str:
+    """Send NRPN (Non-Registered Parameter Number) message.
+
+    Used by many synths for extended parameter control beyond standard CCs.
+
+    Args:
+        channel: MIDI channel 1-16.
+        param_msb: Parameter number MSB (CC#99) 0-127.
+        param_lsb: Parameter number LSB (CC#98) 0-127.
+        value_msb: Data entry MSB (CC#6) 0-127.
+        value_lsb: Data entry LSB (CC#38) 0-127.
+    """
+    engine = _require_connection(ctx)
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(
+        None,
+        lambda: engine.send_nrpn(channel, param_msb, param_lsb, value_msb, value_lsb),
+    )
+    param = (param_msb << 7) | param_lsb
+    value = (value_msb << 7) | value_lsb
+    return f"NRPN param={param} ({param_msb}:{param_lsb}) val={value} on ch {channel}"
+
+
+@mcp.tool()
+async def send_rpn(
+    ctx: Context,
+    channel: int,
+    param_msb: int,
+    param_lsb: int,
+    value_msb: int,
+    value_lsb: int = 0,
+) -> str:
+    """Send RPN (Registered Parameter Number) message.
+
+    Standard RPNs: 0:0 = pitch bend range, 0:1 = fine tuning, 0:2 = coarse tuning.
+
+    Args:
+        channel: MIDI channel 1-16.
+        param_msb: Parameter number MSB (CC#101) 0-127.
+        param_lsb: Parameter number LSB (CC#100) 0-127.
+        value_msb: Data entry MSB (CC#6) 0-127.
+        value_lsb: Data entry LSB (CC#38) 0-127.
+    """
+    engine = _require_connection(ctx)
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(
+        None,
+        lambda: engine.send_rpn(channel, param_msb, param_lsb, value_msb, value_lsb),
+    )
+    param = (param_msb << 7) | param_lsb
+    value = (value_msb << 7) | value_lsb
+    return f"RPN param={param} ({param_msb}:{param_lsb}) val={value} on ch {channel}"
+
+
+@mcp.tool()
+async def send_raw(ctx: Context, data: list[int]) -> str:
+    """Send raw MIDI bytes directly — no framing, no validation.
+
+    For power users who need to send arbitrary MIDI messages.
+
+    Args:
+        data: Raw MIDI bytes, e.g. [0x90, 60, 100] for Note On C4.
+    """
+    engine = _require_connection(ctx)
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, lambda: engine.send_raw(data))
+    hex_str = " ".join(f"{b:02X}" for b in data)
+    return f"Sent raw MIDI ({len(data)} bytes): {hex_str}"
+
+
+# ===================================================================
 # Entry point
 # ===================================================================
 
