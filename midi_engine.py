@@ -253,32 +253,45 @@ class MidiEngine:
 
     # -- Channel Messages --
 
+    @staticmethod
+    def _validate_channel(channel: int) -> int:
+        if not 1 <= channel <= 16:
+            raise ValueError(f"Channel must be 1-16, got {channel}")
+        return channel
+
     def send_note_on(self, channel: int, note: int, velocity: int = 100) -> None:
         """Send Note On. Channel 1-16, note 0-127, velocity 0-127."""
+        self._validate_channel(channel)
         self._send([0x90 | (channel - 1), note & 0x7F, velocity & 0x7F])
 
     def send_note_off(self, channel: int, note: int, velocity: int = 0) -> None:
+        self._validate_channel(channel)
         self._send([0x80 | (channel - 1), note & 0x7F, velocity & 0x7F])
 
     def send_cc(self, channel: int, cc: int, value: int) -> None:
+        self._validate_channel(channel)
         self._send([0xB0 | (channel - 1), cc & 0x7F, value & 0x7F])
 
     def send_program_change(self, channel: int, program: int) -> None:
+        self._validate_channel(channel)
         self._send([0xC0 | (channel - 1), program & 0x7F])
 
     def send_pitch_bend(self, channel: int, value: int = 8192) -> None:
         """Send pitch bend. value: 0-16383, center=8192."""
+        self._validate_channel(channel)
         value = max(0, min(16383, value))
         lsb = value & 0x7F
         msb = (value >> 7) & 0x7F
         self._send([0xE0 | (channel - 1), lsb, msb])
 
     def send_aftertouch(self, channel: int, value: int) -> None:
+        self._validate_channel(channel)
         self._send([0xD0 | (channel - 1), value & 0x7F])
 
     def send_poly_aftertouch(
         self, channel: int, note: int, value: int
     ) -> None:
+        self._validate_channel(channel)
         self._send([0xA0 | (channel - 1), note & 0x7F, value & 0x7F])
 
     def send_bank_select(

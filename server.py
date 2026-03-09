@@ -566,12 +566,18 @@ async def sysex_dump_receive(
     if not messages:
         return "No SysEx data received"
 
-    # Write binary .syx file
+    # Write binary .syx file — sanitize filename to prevent path traversal
+    safe_name = Path(filename).name  # strip any directory components
+    if not safe_name or safe_name.startswith("."):
+        safe_name = "cirklon_dump.syx"
+    if not safe_name.endswith(".syx"):
+        safe_name += ".syx"
+
     raw = bytearray()
     for msg in messages:
         raw.extend(msg)
 
-    path = Path(filename)
+    path = Path.cwd() / safe_name
     path.write_bytes(raw)
     size_kb = len(raw) / 1024
 
