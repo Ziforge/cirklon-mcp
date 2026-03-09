@@ -1,0 +1,14 @@
+[project]
+name = "cirklon-mcp"
+version = "0.1.0"
+description = "MCP server for controlling Sequentix Cirklon hardware MIDI sequencer"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "mcp[cli]>=1.0.0",
+    "python-rtmidi>=1.5.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.scripts]
+cirklon-mcp = "server:main"
