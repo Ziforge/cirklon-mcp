@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -132,8 +133,10 @@ async def disconnect_cirklon(ctx: Context) -> str:
     engine = _engine(ctx)
     # Stop clock if running
     clock_task = ctx.request_context.lifespan_context.get("clock_task")
-    if clock_task and not clock_task.done():
-        clock_task.cancel()
+    if clock_task:
+        thread, stop = clock_task
+        stop.set()
+        thread.join(timeout=1.0)
         ctx.request_context.lifespan_context["clock_task"] = None
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, engine.disconnect)
@@ -188,8 +191,10 @@ async def send_clock(ctx: Context, bpm: float = 0, bars: int = 0) -> str:
 
     # Cancel existing clock
     existing = lc.get("clock_task")
-    if existing and not existing.done():
-        existing.cancel()
+    if existing:
+        old_thread, old_stop = existing
+        old_stop.set()
+        old_thread.join(timeout=1.0)
         lc["clock_task"] = None
 
     if bpm == 0 and config.default_bpm:
@@ -200,25 +205,27 @@ async def send_clock(ctx: Context, bpm: float = 0, bars: int = 0) -> str:
     interval = 60.0 / (bpm * 24)
     total_ticks = bars * 24 * 4 if bars > 0 else 0  # assuming 4/4
 
-    async def _clock_loop() -> None:
+    # A dedicated thread, not asyncio.create_task: a fire-and-forget task does
+    # not outlive the MCP request scope, so the clock stopped the instant this
+    # tool returned even though it reported "Clock running".
+    stop = threading.Event()
+
+    def _clock_loop() -> None:
         ticks = 0
         next_tick = time.perf_counter()
-        loop = asyncio.get_event_loop()
-        try:
-            while True:
-                await loop.run_in_executor(None, engine.send_clock)
-                ticks += 1
-                if total_ticks and ticks >= total_ticks:
-                    break
-                next_tick += interval
-                sleep_for = next_tick - time.perf_counter()
-                if sleep_for > 0:
-                    await asyncio.sleep(sleep_for)
-        except asyncio.CancelledError:
-            pass
+        while not stop.is_set():
+            engine.send_clock()
+            ticks += 1
+            if total_ticks and ticks >= total_ticks:
+                break
+            next_tick += interval
+            sleep_for = next_tick - time.perf_counter()
+            if sleep_for > 0:
+                stop.wait(sleep_for)
 
-    task = asyncio.create_task(_clock_loop())
-    lc["clock_task"] = task
+    thread = threading.Thread(target=_clock_loop, name="cirklon-clock", daemon=True)
+    thread.start()
+    lc["clock_task"] = (thread, stop)
 
     duration = f" for {bars} bars" if bars else " (continuous)"
     return f"Clock running at {bpm} BPM{duration}"
@@ -697,7 +704,7 @@ async def query_status(ctx: Context) -> str:
         lines.append(f"  Input:  {engine._in_port_name}")
     lines.append(f"  Monitor: {'running' if engine.is_monitoring else 'stopped'}")
     lines.append(f"  Log messages: {engine.log_count}")
-    clock_running = clock_task is not None and not clock_task.done()
+    clock_running = clock_task is not None and clock_task[0].is_alive()
     lines.append(f"  Clock: {'running' if clock_running else 'stopped'}")
     lines.append(f"  Remote channel: {config.remote_channel}")
     lines.append(f"  Default BPM: {config.default_bpm}")
