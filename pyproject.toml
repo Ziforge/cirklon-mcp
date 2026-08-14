@@ -5,7 +5,7 @@ description = "MCP server for controlling Sequentix Cirklon hardware MIDI sequen
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "mcp[cli]>=1.0.0,<2",
+    "mcp[cli]>=2,<3",
     "python-rtmidi>=1.5.0",
     "python-dotenv>=1.0.0",
 ]

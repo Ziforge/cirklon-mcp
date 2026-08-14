@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncIterator
 
-from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.mcpserver import Context, MCPServer
 
 from config import CirklonConfig
 from midi_engine import MidiEngine
@@ -18,7 +18,7 @@ from midi_engine import MidiEngine
 # ---------------------------------------------------------------------------
 
 @asynccontextmanager
-async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
+async def lifespan(server: MCPServer) -> AsyncIterator[dict]:
     config = CirklonConfig.from_env()
     engine = MidiEngine()
 
@@ -38,7 +38,7 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
     engine.disconnect()
 
 
-mcp = FastMCP(
+mcp = MCPServer(
     "cirklon-midi",
     instructions="Control a Sequentix Cirklon hardware MIDI sequencer",
     lifespan=lifespan,

@@ -15,7 +15,7 @@ The Cirklon is a class-compliant USB MIDI device with 6 ports — no drivers nee
 - **Monitor** — Log and filter incoming MIDI from the Cirklon
 - **Safety** — All Notes Off, full MIDI panic (reset all channels + stop)
 
-28 tools across 10 categories.
+31 tools across 10 categories.
 
 ## Requirements
 
